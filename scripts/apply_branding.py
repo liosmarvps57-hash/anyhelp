@@ -254,7 +254,7 @@ def patch_links(t: Tree, cfg: dict):
           f"decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF{NEON}), Color(0xFF{ELETRICO})])),")
     credit = (f"{name} © ${{DateTime.now().toString().substring(0, 4)}} {company}\\n"
               "Baseado no RustDesk © Purslane Tech Pte. Ltd., licença AGPL-3.0\\n"
-              f"Código-fonte: {links['source_code']}\\n$license")
+              f"{links['source_code']}\\n$license")
     t.sub(s,
           "'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.\\n$license',",
           f"'{credit}',")
@@ -264,6 +264,197 @@ def patch_links(t: Tree, cfg: dict):
     t.sub(i, "'https://rustdesk.com/privacy.html'", dart_str(links["privacy"]), count=None)
     t.sub("flutter/lib/common.dart", "launchUrl(Uri.parse('https://rustdesk.com'));",
           f"launchUrl(Uri.parse({dart_str(links['website'])}));")
+
+
+# ---------------------------------------------------------------------------
+# 6. Comportamento: instalador, servidor próprio, escala, textos de status
+# ---------------------------------------------------------------------------
+def patch_behavior(t: Tree):
+    # O AnyHelp.exe baixado abre direto na tela de instalação
+    # (que já oferece "Executar sem instalar"). Antes, só abria assim se o
+    # arquivo se chamasse ...install.exe.
+    t.sub("libs/portable/src/main.rs",
+          'let click_setup = args.is_empty() && arg_exe.to_lowercase().ends_with("install.exe");',
+          "let click_setup = args.is_empty();")
+
+    # O servidor vem gravado no código, então o app achava que estava no servidor
+    # público do RustDesk: mostrava "configure seu próprio servidor" e limitava
+    # qualidade/FPS em conexões via relay.
+    t.sub("src/common.rs",
+          '    crate::get_custom_rendezvous_server(get_option("custom-rendezvous-server")).is_empty()\n}',
+          "    false\n}")
+
+    # Escala adaptada como padrão no desktop (a tela remota cabe na janela)
+    t.sub("libs/hbb_common/src/config.rs",
+          'keys::OPTION_VIEW_STYLE => self.get_string(key, "original", vec!["adaptive"]),',
+          'keys::OPTION_VIEW_STYLE => self.get_string(key, "adaptive", vec!["original"]),')
+
+    # Status do rodapé e estado vazio da lista de sessões
+    t.sub("src/lang/pt_BR.rs", '("Ready", "Pronto"),', '("Ready", "Pronto para conexão."),')
+    t.sub("src/lang/pt_PT.rs", '("Ready", "Pronto"),', '("Ready", "Pronto para ligação."),')
+    t.resub("src/lang/pt_BR.rs", r'\("empty_recent_tip", "[^"]*"\),',
+            '("empty_recent_tip", "Nenhuma sessão recente.\\\\nDigite acima o ID de um computador para começar."),')
+    t.sub("src/lang/en.rs",
+          '        ("desk_tip", "Your desktop can be accessed with this ID and password."),\n',
+          '        ("desk_tip", "Your desktop can be accessed with this ID and password."),\n'
+          '        ("Ready", "Ready to connect."),\n')
+    t.resub("src/lang/en.rs", r'\("empty_recent_tip", "[^"]*"\),',
+            '("empty_recent_tip", "No recent sessions yet.\\\\nType a remote ID above to get started."),')
+
+
+# ---------------------------------------------------------------------------
+# 7. Layout da tela principal: janela maior, cartões de ID/senha, dicas
+# ---------------------------------------------------------------------------
+GRAD_BAR = (f"decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, "
+            f"end: Alignment.bottomCenter, colors: [Color(0xFF{NEON}), Color(0xFF{ELETRICO})])),")
+
+HOME_HELPERS = f"""
+
+// ---- AnyHelp: estilos da tela principal ----
+bool _ahDark(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark;
+
+BoxDecoration _ahCard(BuildContext context) {{
+  final dark = _ahDark(context);
+  return BoxDecoration(
+    color: dark ? const Color(0x66{PRETO}) : Colors.white,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(
+        color: dark ? const Color(0x40{NEON}) : const Color(0xFF{CINZA})),
+    boxShadow: dark
+        ? const [BoxShadow(color: Color(0x22{NEON}), blurRadius: 18)]
+        : null,
+  );
+}}
+
+BoxDecoration _ahLeftPane(BuildContext context) {{
+  return BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: _ahDark(context)
+          ? const [Color(0xFF07214A), Color(0xFF{PRETO})]
+          : const [Color(0xFFF1F4F9), Color(0xFFFFFFFF)],
+    ),
+  );
+}}
+
+Widget _ahHint(BuildContext context) {{
+  final muted =
+      Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.75);
+  Widget row(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: const Color(0xFF{NEON})),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(text,
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: muted)),
+            ),
+          ],
+        ),
+      );
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(20, 6, 16, 8),
+    child: Column(
+      children: [
+        row(Icons.support_agent_rounded,
+            'Para receber suporte, informe o ID e a senha acima ao técnico.'),
+        row(Icons.verified_user_outlined,
+            'Ninguém acessa sem a senha ou sem você aceitar a conexão.'),
+        row(Icons.lock_outline_rounded,
+            'Conexão criptografada de ponta a ponta.'),
+      ],
+    ),
+  );
+}}
+"""
+
+
+def patch_layout(t: Tree):
+    # Janela inicial maior (era 800x600)
+    t.sub("flutter/windows/runner/main.cpp",
+          "Win32Window::Size size(800u, 600u);", "Win32Window::Size size(1080u, 720u);")
+
+    h = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    # Painel esquerdo mais largo, com degradê azul-marinho -> preto
+    t.sub(h,
+          "        width: isIncomingOnly ? 280.0 : 200.0,\n"
+          "        color: Theme.of(context).colorScheme.background,",
+          "        width: 300.0,\n"
+          "        decoration: _ahLeftPane(context),")
+    # Dicas abaixo do cartão de senha
+    t.sub(h,
+          "      if (!isOutgoingOnly) buildPasswordBoard(context),\n",
+          "      if (!isOutgoingOnly) buildPasswordBoard(context),\n"
+          "      if (!isOutgoingOnly) _ahHint(context),\n")
+    # Cartão do ID
+    t.sub(h,
+          "      margin: const EdgeInsets.only(left: 20, right: 11),\n      height: 57,",
+          "      margin: const EdgeInsets.only(left: 16, right: 16, top: 10),\n"
+          "      padding: const EdgeInsets.fromLTRB(14, 8, 8, 10),\n"
+          "      decoration: _ahCard(context),\n"
+          "      height: 100,")
+    t.sub(h, "decoration: const BoxDecoration(color: MyTheme.accent),", GRAD_BAR)
+    t.sub(h,
+          "                        style: TextStyle(\n                          fontSize: 22,\n                        ),",
+          "                        style: TextStyle(\n"
+          "                          fontSize: 30,\n"
+          "                          fontFamily: 'Sora',\n"
+          "                          fontWeight: FontWeight.w700,\n"
+          "                          letterSpacing: 1.5,\n"
+          f"                          color: _ahDark(context) ? const Color(0xFF{NEON}) : const Color(0xFF{ELETRICO}),\n"
+          f"                          shadows: _ahDark(context) ? const [Shadow(color: Color(0x66{NEON}), blurRadius: 14)] : null,\n"
+          "                        ),")
+    # Cartão da senha
+    t.sub(h,
+          "      margin: EdgeInsets.only(left: 20.0, right: 16, top: 13, bottom: 13),",
+          "      margin: EdgeInsets.only(left: 16.0, right: 16, top: 12, bottom: 12),\n"
+          "      padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),\n"
+          "      decoration: _ahCard(context),")
+    t.sub(h, "decoration: BoxDecoration(color: MyTheme.accent),", GRAD_BAR)
+    t.sub(h, "style: TextStyle(fontSize: 15),",
+          "style: TextStyle(fontSize: 21, fontFamily: 'Sora', fontWeight: FontWeight.w600, letterSpacing: 2),")
+    # Cartão de aviso (era rosa) nas cores da marca, com cantos arredondados
+    t.sub(h,
+          "          margin: EdgeInsets.fromLTRB(\n"
+          "              0, marginTop, 0, bind.isIncomingOnly() ? marginTop : 0),\n"
+          "          child: Container(\n"
+          "              decoration: BoxDecoration(\n"
+          "                  gradient: LinearGradient(\n"
+          "                begin: Alignment.centerLeft,\n"
+          "                end: Alignment.centerRight,\n"
+          "                colors: [\n"
+          "                  Color.fromARGB(255, 226, 66, 188),\n"
+          "                  Color.fromARGB(255, 244, 114, 124),\n"
+          "                ],\n"
+          "              )),",
+          "          margin: EdgeInsets.fromLTRB(\n"
+          "              16, marginTop, 16, bind.isIncomingOnly() ? marginTop : 16),\n"
+          "          child: Container(\n"
+          "              decoration: BoxDecoration(\n"
+          "                  borderRadius: BorderRadius.circular(12),\n"
+          "                  gradient: LinearGradient(\n"
+          "                begin: Alignment.topLeft,\n"
+          "                end: Alignment.bottomRight,\n"
+          "                colors: [\n"
+          f"                  Color(0xFF{ELETRICO}),\n"
+          "                  Color(0xFF0A2F6B),\n"
+          "                ],\n"
+          "              )),")
+    p = t.path(h)
+    p.write_text(p.read_text(encoding="utf-8") + HOME_HELPERS, encoding="utf-8")
+
+    # Estado vazio da lista de sessões: ícone da marca no lugar da carinha triste
+    t.sub("flutter/lib/common/widgets/peers_view.dart",
+          "                  Icons.sentiment_very_dissatisfied_rounded,\n"
+          "                  color: Theme.of(context).tabBarTheme.labelColor,\n"
+          "                  size: 40,",
+          "                  Icons.devices_other_rounded,\n"
+          f"                  color: const Color(0xFF{NEON}),\n"
+          "                  size: 44,")
 
 
 def validate_server(server: str, key: str, allow_placeholder: bool):
@@ -305,6 +496,8 @@ def main():
         copy_assets(t)
         patch_theme(t, cfg)
         patch_links(t, cfg)
+        patch_behavior(t)
+        patch_layout(t)
     except BrandingError as e:
         print(f"ERRO: {e}", file=sys.stderr)
         sys.exit(1)
