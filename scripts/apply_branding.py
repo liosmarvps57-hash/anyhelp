@@ -284,6 +284,10 @@ def patch_behavior(t: Tree):
           '    crate::get_custom_rendezvous_server(get_option("custom-rendezvous-server")).is_empty()\n}',
           "    false\n}")
 
+    # Reforço: remove da tela o link "configure seu próprio servidor" (levava ao pricing do RustDesk)
+    t.sub("flutter/lib/desktop/pages/connection_page.dart",
+          "            if (!isIncomingOnly) setupServerWidget(),\n", "")
+
     # Escala adaptada como padrão no desktop (a tela remota cabe na janela)
     t.sub("libs/hbb_common/src/config.rs",
           'keys::OPTION_VIEW_STYLE => self.get_string(key, "original", vec!["adaptive"]),',
