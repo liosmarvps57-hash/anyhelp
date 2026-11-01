@@ -1,0 +1,35 @@
+# Verificação rápida (~1 min): a marca AnyHelp ainda encaixa na versão do RustDesk
+# definida em anyhelp.json? Roda a cada push e antes de gastar 1 hora no build completo.
+name: Verificar marca
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Baixar RustDesk
+        run: |
+          TAG=$(python3 -c "import json;print(json.load(open('anyhelp.json'))['upstream']['tag'])")
+          REPO=$(python3 -c "import json;print(json.load(open('anyhelp.json'))['upstream']['repo'])")
+          git clone --depth 1 --branch "$TAG" --recurse-submodules --shallow-submodules "$REPO" rustdesk
+
+      - name: Aplicar marca (servidor de teste)
+        run: python3 scripts/apply_branding.py rustdesk --allow-placeholder-server
+
+      - name: Ler versões das ferramentas
+        run: python3 scripts/upstream_versions.py rustdesk
+
+      - name: Conferir sintaxe Rust alterada
+        run: |
+          rustfmt --edition 2021 --check rustdesk/src/auth_2fa.rs || true
+          rustfmt --edition 2021 --emit stdout rustdesk/libs/hbb_common/src/config.rs > /dev/null

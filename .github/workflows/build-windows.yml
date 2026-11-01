@@ -1,0 +1,326 @@
+# Compila o AnyHelp para Windows (x64).
+#
+# Como funciona:
+#   1. prepare  - baixa o RustDesk na versão de anyhelp.json e aplica a marca AnyHelp
+#   2. bridge   - gera a ponte Rust <-> Flutter (igual ao pipeline oficial do RustDesk)
+#   3. windows  - compila e empacota o AnyHelp-<versão>-x64.exe
+#
+# Antes do primeiro build, cadastre no GitHub (Settings > Secrets and variables > Actions):
+#   Variables:  ANYHELP_SERVER   IP ou domínio da VPS          (ex.: 203.0.113.10)
+#               ANYHELP_KEY      conteúdo do id_ed25519.pub do servidor
+#   Secrets (opcional, assinatura de código):
+#               WINDOWS_PFX_BASE64   certificado .pfx em base64
+#               WINDOWS_PFX_PASSWORD senha do .pfx
+#
+# Gatilhos: botão "Run workflow" (gera artefato) ou push de tag v* (gera Release pública).
+
+name: Build AnyHelp (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Preparar código com a marca AnyHelp
+    runs-on: ubuntu-22.04
+    outputs:
+      flutter_version: ${{ steps.versions.outputs.flutter_version }}
+      llvm_version: ${{ steps.versions.outputs.llvm_version }}
+      vcpkg_commit_id: ${{ steps.versions.outputs.vcpkg_commit_id }}
+      windows_rust_version: ${{ steps.versions.outputs.windows_rust_version }}
+      version: ${{ steps.versions.outputs.version }}
+      bridge_rust_version: ${{ steps.versions.outputs.bridge_rust_version }}
+      bridge_flutter_version: ${{ steps.versions.outputs.bridge_flutter_version }}
+      cargo_expand_version: ${{ steps.versions.outputs.cargo_expand_version }}
+      frb_version: ${{ steps.versions.outputs.frb_version }}
+    steps:
+      - name: Checkout AnyHelp
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Baixar RustDesk (versão fixada em anyhelp.json)
+        run: |
+          TAG=$(python3 -c "import json;print(json.load(open('anyhelp.json'))['upstream']['tag'])")
+          REPO=$(python3 -c "import json;print(json.load(open('anyhelp.json'))['upstream']['repo'])")
+          echo "RustDesk $TAG de $REPO"
+          git clone --depth 1 --branch "$TAG" --recurse-submodules --shallow-submodules "$REPO" rustdesk
+
+      - name: Aplicar marca AnyHelp
+        env:
+          ANYHELP_SERVER: ${{ vars.ANYHELP_SERVER }}
+          ANYHELP_KEY: ${{ vars.ANYHELP_KEY }}
+        run: python3 scripts/apply_branding.py rustdesk
+
+      - name: Ler versões das ferramentas usadas pelo RustDesk
+        id: versions
+        run: python3 scripts/upstream_versions.py rustdesk | tee -a "$GITHUB_OUTPUT"
+
+      - name: Empacotar código
+        run: tar -czf anyhelp-src.tar.gz rustdesk
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: anyhelp-src
+          path: anyhelp-src.tar.gz
+          retention-days: 3
+
+  bridge:
+    name: Gerar ponte Rust/Flutter
+    needs: prepare
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anyhelp-src
+
+      - name: Extrair código
+        run: tar -xzf anyhelp-src.tar.gz
+
+      - name: Instalar pré-requisitos
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake curl gcc git g++ libclang-dev libgtk-3-dev llvm-dev nasm ninja-build pkg-config wget
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.bridge_rust_version }}
+          targets: x86_64-unknown-linux-gnu
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: bridge-ubuntu
+          workspaces: rustdesk
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ needs.prepare.outputs.bridge_flutter_version }}
+          cache: true
+
+      - name: Instalar flutter_rust_bridge
+        run: |
+          cargo install cargo-expand --version ${{ needs.prepare.outputs.cargo_expand_version }} --locked
+          cargo install flutter_rust_bridge_codegen --version ${{ needs.prepare.outputs.frb_version }} --features "uuid" --locked
+          cd rustdesk
+          # mesmo ajuste do pipeline oficial para o Flutter 3.22.x
+          sed -i -e 's/extended_text: 14.0.0/extended_text: 13.0.0/g' flutter/pubspec.yaml
+          cd flutter && flutter pub get
+
+      - name: Gerar ponte
+        working-directory: rustdesk
+        run: |
+          ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart --c-output ./flutter/macos/Runner/bridge_generated.h
+          cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bridge
+          retention-days: 3
+          path: |
+            rustdesk/src/bridge_generated.rs
+            rustdesk/src/bridge_generated.io.rs
+            rustdesk/flutter/lib/generated_bridge.dart
+            rustdesk/flutter/lib/generated_bridge.freezed.dart
+            rustdesk/flutter/macos/Runner/bridge_generated.h
+            rustdesk/flutter/ios/Runner/bridge_generated.h
+
+  windows:
+    name: Compilar AnyHelp para Windows x64
+    needs: [prepare, bridge]
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      FLUTTER_VERSION: ${{ needs.prepare.outputs.flutter_version }}
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      HAS_SIGNING: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
+    steps:
+      - name: Exportar variáveis de cache do GitHub Actions
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anyhelp-src
+
+      - name: Extrair código
+        shell: bash
+        run: tar -xzf anyhelp-src.tar.gz
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge
+          path: rustdesk
+
+      - name: Instalar LLVM e Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ needs.prepare.outputs.llvm_version }}
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      # Mesmo engine Flutter customizado que o RustDesk usa no Windows x64
+      - name: Trocar engine pelo engine do RustDesk
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Aplicar patch do Flutter (igual ao oficial)
+        shell: bash
+        run: |
+          cp rustdesk/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          if [[ "3.24.5" == "${{ env.FLUTTER_VERSION }}" ]]; then
+            git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+          fi
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.windows_rust_version }}
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+          workspaces: rustdesk
+
+      - name: Configurar vcpkg (com cache)
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ needs.prepare.outputs.vcpkg_commit_id }}
+          doNotCache: false
+
+      - name: Instalar dependências nativas (vcpkg)
+        shell: bash
+        working-directory: rustdesk
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r f; do echo "== $f"; cat "$f"; done
+            exit 1
+          fi
+
+      - name: Compilar
+        working-directory: rustdesk
+        run: |
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          mv ./flutter/build/windows/x64/runner/Release ./anyhelp
+
+          # Driver de monitor virtual (mesmo pacote usado pelo RustDesk)
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          mv -Force .\usbmmidd_v2 ./anyhelp
+
+          # Driver de impressora remota (opcional; ignorado se o download falhar)
+          try {
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile printer_driver.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums -OutFile sha256sums
+            $sumDriver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
+            $sumAdapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
+            if ($sumDriver -eq (Get-FileHash printer_driver.zip).Hash -and $sumAdapter -eq (Get-FileHash printer_driver_adapter.zip).Hash) {
+              Expand-Archive printer_driver.zip -DestinationPath .
+              mkdir ./anyhelp/drivers
+              mv -Force .\rustdesk_printer_driver_v4-1.4 ./anyhelp/drivers/RustDeskPrinterDriver
+              Expand-Archive printer_driver_adapter.zip -DestinationPath .
+              mv -Force .\printer_driver_adapter.dll ./anyhelp
+            } else { Write-Output "Checksum do driver de impressora não confere; ignorado." }
+          } catch { Write-Output "Driver de impressora indisponível; ignorado." }
+
+          if (-not (Test-Path ./anyhelp/AnyHelp.exe)) { throw "AnyHelp.exe não foi gerado" }
+
+      - name: Copiar recursos de versão para o empacotador
+        shell: bash
+        working-directory: rustdesk
+        continue-on-error: true
+        run: |
+          runner_res=$(find . -name "Runner.res" | head -1)
+          if [ -n "$runner_res" ]; then cp "$runner_res" ./libs/portable/Runner.res; fi
+
+      - name: Assinar executáveis internos
+        if: env.HAS_SIGNING == 'true'
+        working-directory: rustdesk
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:PFX_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          Get-ChildItem ./anyhelp -Recurse -Include *.exe,*.dll | Where-Object { $_.FullName -notmatch 'RustDeskPrinterDriver|usbmmidd_v2' } | ForEach-Object {
+            & $signtool.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:PFX_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "falha ao assinar $($_.FullName)" }
+          }
+
+      - name: Gerar executável único (AnyHelp.exe)
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../anyhelp/ -o . -e ../../anyhelp/AnyHelp.exe
+          popd
+          mkdir -p ../dist
+          cp ./target/release/rustdesk-portable-packer.exe "../dist/AnyHelp-${VERSION}-x64.exe"
+          cp ./target/release/rustdesk-portable-packer.exe ../dist/AnyHelp.exe
+
+      - name: Assinar executável final
+        if: env.HAS_SIGNING == 'true'
+        env:
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          Get-ChildItem ./dist/*.exe | ForEach-Object {
+            & $signtool.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:PFX_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "falha ao assinar $($_.FullName)" }
+          }
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx" -ErrorAction SilentlyContinue
+
+      - name: Checksums
+        shell: bash
+        run: cd dist && sha256sum *.exe | tee SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: AnyHelp-windows-x64
+          path: dist/
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          name: AnyHelp ${{ github.ref_name }}
+          body: |
+            AnyHelp para Windows (x64), baseado no RustDesk ${{ env.VERSION }}.
+            Baixe **AnyHelp.exe**, execute e informe seu ID e senha para quem vai te atender.
+          files: |
+            dist/AnyHelp.exe
+            dist/AnyHelp-*-x64.exe
+            dist/SHA256SUMS.txt

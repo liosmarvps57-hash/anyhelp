@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacidade | AnyHelp</title>
+<meta name="description" content="Como o AnyHelp, da RZ System, trata os dados das máquinas e das sessões de acesso remoto.">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<!--
+  RASCUNHO PARA REVISÃO JURÍDICA (LGPD). Descreve o funcionamento técnico real do
+  AnyHelp/RustDesk Server OSS. Complete os dados do controlador (razão social, CNPJ,
+  endereço e e-mail do encarregado) antes de publicar.
+-->
+<style>
+  :root { --neon:#00CFFF; --eletrico:#008DFF; --marinho:#061B3D; --preto:#020B18; --cinza:#BFC9D9; --line:rgba(0,207,255,.16); }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--preto); color:#fff; font:400 16px/1.7 Inter,system-ui,sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+  header { border-bottom:1px solid var(--line); }
+  header .wrap { display:flex; align-items:center; justify-content:space-between; height:68px; }
+  header img { height:28px; }
+  header a.back { color:var(--cinza); font-size:14px; text-decoration:none; }
+  main { padding: 56px 0 80px; }
+  h1, h2 { font-family: Sora, Inter, sans-serif; line-height:1.2; }
+  h1 { font-size: clamp(30px, 5vw, 40px); margin:0 0 8px; }
+  h2 { font-size: 20px; margin: 40px 0 10px; color: var(--neon); }
+  p, li { color: var(--cinza); }
+  strong { color:#fff; }
+  a { color: var(--neon); }
+  .upd { color:#8D9BB3; font-size:14px; margin-bottom:32px; }
+  table { width:100%; border-collapse:collapse; font-size:15px; margin:12px 0; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:#fff; font-weight:600; background:rgba(6,27,61,.6); }
+  td { color: var(--cinza); }
+  .scroll { overflow-x:auto; }
+  footer { border-top:1px solid var(--line); padding:28px 0; color:#8D9BB3; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a href="index.html"><img src="assets/logo-dark.svg" alt="AnyHelp"></a>
+    <a class="back" href="index.html">← Voltar</a>
+  </div>
+</header>
+<main class="wrap">
+  <h1>Política de privacidade do AnyHelp</h1>
+  <p class="upd">Última atualização: <span id="d">[preencher data]</span></p>
+
+  <p>O AnyHelp é o software de acesso remoto da <strong>RZ System</strong>. Esta página explica quais dados o AnyHelp trata, para quê, e quais são os seus direitos conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018).</p>
+
+  <h2>1. Quem é o responsável</h2>
+  <p><strong>[Razão social da RZ System]</strong>, CNPJ <strong>[00.000.000/0000-00]</strong>, [endereço]. Encarregado de dados (DPO): <a href="mailto:privacidade@rzsystem.com.br">[privacidade@rzsystem.com.br]</a>.</p>
+
+  <h2>2. O que o AnyHelp não faz</h2>
+  <ul>
+    <li><strong>Não exige cadastro</strong>: não pedimos nome, e-mail nem telefone para usar o app.</li>
+    <li><strong>Não grava suas sessões</strong> nos nossos servidores. A tela, o teclado, os arquivos e o chat trafegam criptografados de ponta a ponta entre as duas máquinas.</li>
+    <li><strong>Não vende nem compartilha</strong> dados com terceiros para publicidade.</li>
+  </ul>
+
+  <h2>3. Dados técnicos tratados pelo servidor</h2>
+  <p>Para que uma máquina encontre a outra, cada AnyHelp aberto se registra no servidor da RZ System. Esse registro contém:</p>
+  <div class="scroll">
+  <table>
+    <tr><th>Dado</th><th>Finalidade</th></tr>
+    <tr><td>ID do AnyHelp (número de 9 dígitos) e identificador do dispositivo</td><td>Localizar a máquina quando alguém digita o ID</td></tr>
+    <tr><td>Chave pública do dispositivo</td><td>Garantir que a conexão é com a máquina certa (criptografia)</td></tr>
+    <tr><td>Endereço IP e horário do último contato</td><td>Estabelecer a conexão direta entre as máquinas; segurança e prevenção de abuso</td></tr>
+  </table>
+  </div>
+  <p>Quando a conexão direta não é possível, o tráfego passa pelo nosso <strong>servidor de relay</strong>, que apenas repassa os dados já criptografados, sem conseguir lê-los.</p>
+  <p><strong>Base legal:</strong> execução do serviço solicitado por você e legítimo interesse em manter o serviço seguro (art. 7º, V e IX, da LGPD).</p>
+
+  <h2>4. Dados guardados no seu computador</h2>
+  <p>O app guarda localmente as configurações, a senha permanente (se você definir uma, de forma cifrada) e o histórico de máquinas acessadas. Esses dados não são enviados à RZ System e podem ser apagados desinstalando o AnyHelp.</p>
+
+  <h2>5. Por quanto tempo</h2>
+  <p>O registro técnico de cada ID fica no servidor enquanto o dispositivo continuar usando o AnyHelp. Registros de máquinas inativas e logs de conexão são eliminados periodicamente, em até <strong>[90] dias</strong>.</p>
+
+  <h2>6. Onde ficam os servidores</h2>
+  <p>Os servidores do AnyHelp são operados pela RZ System em provedor de nuvem localizado em <strong>[país/região do provedor]</strong>.</p>
+
+  <h2>7. Seus direitos</h2>
+  <p>Você pode pedir confirmação, acesso, correção ou eliminação dos dados vinculados ao seu ID, entre outros direitos do art. 18 da LGPD, pelo e-mail do encarregado acima. Informe o ID do AnyHelp para localizarmos o registro.</p>
+
+  <h2>8. Quem acessa a sua máquina</h2>
+  <p>Ninguém acessa o seu computador sem o ID <strong>e</strong> a senha, ou sem você clicar em "Aceitar". Compartilhe esses dados só com quem você confia. A RZ System não se responsabiliza por acessos autorizados por você a terceiros.</p>
+
+  <h2>9. Alterações</h2>
+  <p>Esta política pode ser atualizada. A data no topo indica a versão vigente.</p>
+</main>
+<footer><div class="wrap">© <span id="y"></span> RZ System. AnyHelp é baseado no RustDesk (AGPL-3.0).</div></footer>
+<script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# checkouts temporários do RustDesk usados para testar o script
+/rustdesk/
+/teste-rustdesk/
+/dist/
+*.tar.gz
+
+# servidor: nunca versionar chaves nem configuração local
+server/data/
+server/.env
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

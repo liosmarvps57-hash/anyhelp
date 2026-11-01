@@ -1,0 +1,28 @@
+{
+  "app_name": "AnyHelp",
+  "company": "RZ System",
+  "slogan": "Soluções inteligentes para o seu negócio",
+
+  "upstream": {
+    "repo": "https://github.com/rustdesk/rustdesk.git",
+    "tag": "1.5.1"
+  },
+
+  "links": {
+    "website": "https://rzsystem.com.br/anyhelp",
+    "privacy": "https://rzsystem.com.br/anyhelp/privacidade",
+    "source_code": "https://github.com/liosmarvps57-hash/anyhelp"
+  },
+
+  "default_theme": "dark",
+
+  "hard_settings": {
+    "disable-account": "Y",
+    "disable-ab": "Y"
+  },
+
+  "builtin_settings": {
+    "hide-server-settings": "Y",
+    "hide-powered-by-me": "Y"
+  }
+}

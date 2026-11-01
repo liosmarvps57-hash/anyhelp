@@ -1,0 +1,40 @@
+# Servidor AnyHelp = RustDesk Server OSS (hbbs + hbbr)
+#   hbbs: ID / rendezvous — registra cada máquina e intermedia a conexão direta
+#   hbbr: relay — repassa o tráfego quando a conexão direta (P2P) não é possível
+#
+# Uso:  cp .env.example .env  &&  editar ANYHELP_HOST  &&  docker compose up -d
+# A chave pública que vai dentro do app fica em ./data/id_ed25519.pub
+
+services:
+  hbbs:
+    container_name: anyhelp-hbbs
+    image: ${SERVER_IMAGE:-rustdesk/rustdesk-server:latest}
+    # -k _  => só aceita clientes que tenham a chave pública deste servidor (o AnyHelp)
+    command: hbbs -r ${ANYHELP_HOST:?defina ANYHELP_HOST no .env}:21117 -k _
+    volumes:
+      - ./data:/root
+    # rede do host: o hbbs precisa ver o IP real dos clientes para a conexão direta (NAT traversal)
+    network_mode: host
+    depends_on:
+      - hbbr
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  hbbr:
+    container_name: anyhelp-hbbr
+    image: ${SERVER_IMAGE:-rustdesk/rustdesk-server:latest}
+    command: hbbr -k _
+    environment:
+      # Limites de banda do relay em Mb/s (ajuste ao plano da VPS)
+      TOTAL_BANDWIDTH: ${TOTAL_BANDWIDTH:-1024}
+      SINGLE_BANDWIDTH: ${SINGLE_BANDWIDTH:-128}
+      LIMIT_SPEED: ${LIMIT_SPEED:-32}
+    volumes:
+      - ./data:/root
+    network_mode: host
+    restart: unless-stopped
+    logging: *logging
